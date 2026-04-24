@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.ipynb_checkpoints/
+
+# Local editor and environment state
+.vscode/
+.env
+.venv/
+venv/
+env/
+
+# Raw and preprocessed data
+raw_data_cube/
+preprocessed_cache/
+preprocessed_sad/
+ed_prediction_5w/
+*.npz
+*.npy
+*.pt
+*.pkl
+
+# Model checkpoints and experiment logs
+checkpoints*/
+logs*/
+*.ckpt
+*.log
+events.out.tfevents.*
+lightning_logs/
+wandb/
+
+# Generated scientific outputs and visualizations
+*.cube
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+
+# OS files
+.DS_Store
+Thumbs.db
