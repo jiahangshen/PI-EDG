@@ -39,19 +39,17 @@ Build the reusable `64³` cache once:
 python preprocess_cache.py \
   --raw_data_root /path/to/edbench/input \
   --cache_dir /path/to/edbench/cache \
-  --recursive_sample_scan \
-  --cache_format train_ready_grid64
+  --recursive_sample_scan
 ```
 
 ## Train
 
 ```bash
-python train_softmoe_phys_duoka.py \
+python train.py \
   --devices 0 \
-  --cache_dir /path/to/edbench/cache \
-  --train_id_file splits/train_ids.npy \
-  --val_id_file splits/validation_ids.npy \
-  --strict_data --skip_lr_find --logger_type csv
+  --cache-dir /path/to/edbench/cache \
+  --train-ids splits/train_ids.npy \
+  --val-ids splits/validation_ids.npy
 ```
 
 The default model is the PI-EDG Hybrid FNO–CNN backbone with density-space experts. Adjust training options with `--help` for your hardware and use case.
@@ -79,7 +77,7 @@ python evaluate.py \
   --voxel-volume-bohr3 0.064
 ```
 
-Set `--voxel-volume-bohr3` to match your source-density integration convention. For details about the paper implementation and split provenance, see [PAPER_ALIGNMENT.md](PAPER_ALIGNMENT.md) and [`splits/provenance.json`](splits/provenance.json). The later F3/S3 research variants are not part of this paper-version release.
+Set `--voxel-volume-bohr3` to match your source-density integration convention. The supplied 2,000 evaluation IDs are a subset of the validation IDs, not an independent test set; see [`splits/provenance.json`](splits/provenance.json). Numerical details that differ from simplified manuscript equations are listed in [Implementation notes](IMPLEMENTATION_NOTES.md).
 
 ## License
 

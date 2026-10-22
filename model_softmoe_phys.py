@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 import numpy as np
-import math
 
 
 def normalize_density_to_electrons(
@@ -66,7 +65,6 @@ class HybridBottleneck(nn.Module):
         out_channels,
         modes=(4, 4, 4),
         groups=8,
-        use_fno=True,
     ):
         super().__init__()
         norm_groups = _resolve_group_count(out_channels, groups)
@@ -75,16 +73,11 @@ class HybridBottleneck(nn.Module):
             nn.GroupNorm(norm_groups, out_channels),
             nn.SiLU(inplace=True)
         )
-        self.fno_branch = (
-            SpectralConv3d(in_channels, out_channels, *modes)
-            if use_fno
-            else None
-        )
+        self.fno_branch = SpectralConv3d(in_channels, out_channels, *modes)
         self.act = nn.SiLU()
     def forward(self, x):
         result = self.conv_branch(x)
-        if self.fno_branch is not None:
-            result = result + self.fno_branch(x)
+        result = result + self.fno_branch(x)
         return self.act(result)
 
 class ResBlock(nn.Module):
@@ -112,7 +105,6 @@ class PhysicsResUNet(nn.Module):
         encoder_block_counts=(1, 1, 1, 1),
         decoder_block_counts=(1, 1, 1),
         use_activation_checkpointing=False,
-        bottleneck_type="hybrid",
     ):
         super().__init__()
         self.phys_channels = 2
@@ -132,7 +124,6 @@ class PhysicsResUNet(nn.Module):
                 c4,
                 modes=bottleneck_modes,
                 groups=norm_groups,
-                use_fno=bottleneck_type == "hybrid",
             )
         ]
         for _ in range(max(0, encoder_block_counts[3] - 1)):
@@ -142,7 +133,6 @@ class PhysicsResUNet(nn.Module):
                     c4,
                     modes=bottleneck_modes,
                     groups=norm_groups,
-                    use_fno=bottleneck_type == "hybrid",
                 )
             )
         self.bottleneck = nn.Sequential(*bottleneck_blocks)
@@ -190,20 +180,6 @@ class PhysicsResUNet(nn.Module):
         xu3 = self.inject_physics(torch.cat([self.up3(xd2), x1], dim=1), v_ext, z_spike); xd3 = self._run_block(self.dec3, xu3)
         return xd3
 
-class MoEHardConstraintLayer(nn.Module):
-    def __init__(self, threshold=1e-2):
-        super().__init__()
-        self.threshold = threshold
-
-    def forward(self, rho_cubic, total_electrons):
-        mask = torch.sigmoid((rho_cubic - self.threshold) * 100)
-        rho_cubic_masked = rho_cubic * mask
-        rho_real = torch.pow(rho_cubic_masked, 3.0)
-        current_sum = torch.sum(rho_real, dim=(1, 2, 3, 4), keepdim=True) + 1e-8
-        target_sum = total_electrons.view(-1, 1, 1, 1, 1)
-        scale = target_sum / current_sum
-        return rho_real * scale
-
 class LogSpaceLearnableRouter(nn.Module):
     def __init__(self, num_experts, initial_bins, temperature=2.0):
         super().__init__()
@@ -225,28 +201,10 @@ class LogSpaceLearnableRouter(nn.Module):
         thresholds = self.base_val + torch.cumsum(gaps, dim=0)
         return thresholds
 
-    def forward(self, guide_field_log10, hard_routing=False, routing_space="log"):
+    def forward(self, guide_field_log10):
         thresholds = self.get_thresholds_log10()
-        if self.num_experts == 1:
-            return torch.ones_like(guide_field_log10), thresholds
         t = thresholds.view(1, -1, 1, 1, 1)
-
-        if routing_space == "log":
-            boundary_logits = self.temperature * (guide_field_log10 - t)
-        elif routing_space == "linear":
-            guide_linear = torch.pow(
-                10.0, torch.clamp(guide_field_log10, min=-35.0, max=4.0)
-            )
-            threshold_linear = torch.pow(
-                10.0, torch.clamp(t, min=-35.0, max=4.0)
-            )
-            relative_difference = (
-                (guide_linear - threshold_linear)
-                / (guide_linear + threshold_linear + 1e-35)
-            )
-            boundary_logits = self.temperature * relative_difference
-        else:
-            raise ValueError(f"Unsupported routing_space={routing_space}")
+        boundary_logits = self.temperature * (guide_field_log10 - t)
 
         boundaries = torch.sigmoid(boundary_logits)
 
@@ -254,15 +212,10 @@ class LogSpaceLearnableRouter(nn.Module):
         probs.append(1.0 - boundaries[:, 0:1, ...])
         for i in range(self.num_experts - 2):
             probs.append(boundaries[:, i:i+1, ...] - boundaries[:, i+1:i+2, ...])
-        if self.num_experts > 1:
-            probs.append(boundaries[:, -1:, ...])
+        probs.append(boundaries[:, -1:, ...])
 
         routing_weights = torch.cat(probs, dim=1)
         routing_weights = routing_weights / (torch.sum(routing_weights, dim=1, keepdim=True) + 1e-8)
-
-        if hard_routing:
-            hard_index = torch.argmax(routing_weights, dim=1, keepdim=True)
-            routing_weights = torch.zeros_like(routing_weights).scatter_(1, hard_index, 1.0)
 
         return routing_weights, thresholds
 
@@ -284,34 +237,11 @@ class PhysicsMoE(nn.Module):
         shared_expert_depth=2,
         routing_backbone_grad_scale=1.0,
         use_activation_checkpointing=False,
-        prediction_space="cubic",
-        bottleneck_type="hybrid",
-        routing_space="log",
-        expert_output_mode="interval_sigmoid",
-        fusion_mode="soft",
     ):
         super().__init__()
         self.num_experts = num_experts
         self.routing_backbone_grad_scale = routing_backbone_grad_scale
         self.use_activation_checkpointing = use_activation_checkpointing
-        if prediction_space not in {"cubic", "raw"}:
-            raise ValueError(f"Unsupported prediction_space={prediction_space}")
-        self.prediction_space = prediction_space
-        if routing_space not in {"log", "linear"}:
-            raise ValueError(f"Unsupported routing_space={routing_space}")
-        self.routing_space = routing_space
-        if expert_output_mode not in {
-            "interval_sigmoid",
-            "interval_unbounded",
-            "global_sigmoid",
-        }:
-            raise ValueError(
-                f"Unsupported expert_output_mode={expert_output_mode}"
-            )
-        self.expert_output_mode = expert_output_mode
-        if fusion_mode not in {"soft", "top1_st"}:
-            raise ValueError(f"Unsupported fusion_mode={fusion_mode}")
-        self.fusion_mode = fusion_mode
 
         self.backbone = PhysicsResUNet(
             in_channels_atom,
@@ -323,7 +253,6 @@ class PhysicsMoE(nn.Module):
             encoder_block_counts=encoder_block_counts,
             decoder_block_counts=decoder_block_counts,
             use_activation_checkpointing=use_activation_checkpointing,
-            bottleneck_type=bottleneck_type,
         )
         guide_hidden_channels = guide_hidden_channels or max(self.backbone.out_features // 2, 16)
 
@@ -347,31 +276,8 @@ class PhysicsMoE(nn.Module):
             shared_in_channels = expert_hidden_channels
         self.shared_expert_trunk = nn.Sequential(*shared_expert_layers)
         self.expert_out = nn.Conv3d(expert_hidden_channels, num_experts, kernel_size=1)
-        if self.expert_output_mode == "global_sigmoid":
-            initial_internal = np.asarray(initial_bins[1:-1], dtype=np.float64)
-            initial_thresholds_cubic = np.power(initial_internal, 1.0 / 3.0)
-            initial_min = np.zeros(num_experts, dtype=np.float64)
-            initial_max = np.zeros(num_experts, dtype=np.float64)
-            if num_experts > 1:
-                initial_min[1:] = initial_thresholds_cubic
-                initial_max[:-1] = initial_thresholds_cubic
-            initial_max[-1] = 21.5443
-            midpoint_fraction = np.clip(
-                0.5 * (initial_min + initial_max) / 21.5443,
-                1e-6,
-                1.0 - 1e-6,
-            )
-            initial_bias = np.log(
-                midpoint_fraction / (1.0 - midpoint_fraction)
-            )
-            with torch.no_grad():
-                self.expert_out.bias.copy_(
-                    torch.as_tensor(initial_bias, dtype=self.expert_out.bias.dtype)
-                )
 
-        self.constraint = MoEHardConstraintLayer(threshold=1e-2)
-
-    def forward(self, atom_grid, pe_grid, v_ext, z_spike, total_electrons, use_constraint=True):
+    def forward(self, atom_grid, pe_grid, v_ext, z_spike):
         features = self.backbone(atom_grid, pe_grid, v_ext, z_spike)
         guide_field_attached = self.guide_predictor_log10(features)
         guide_field_detached = self.guide_predictor_log10(features.detach())
@@ -380,34 +286,13 @@ class PhysicsMoE(nn.Module):
             + (1.0 - self.routing_backbone_grad_scale) * guide_field_attached.detach()
         )
 
-        routing_weights, thresholds_log10 = self.router(
-            guide_field_routing,
-            hard_routing=getattr(self, "use_hard_routing", False),
-            routing_space=self.routing_space,
-        )
+        routing_weights, thresholds_log10 = self.router(guide_field_routing)
 
         if self.use_activation_checkpointing and self.training:
             expert_features = checkpoint(self.shared_expert_trunk, features, use_reentrant=False)
         else:
             expert_features = self.shared_expert_trunk(features)
         expert_raw = self.expert_out(expert_features)
-        if self.prediction_space == "raw":
-            expert_outputs_raw = F.softplus(expert_raw)
-            final_density = torch.sum(
-                routing_weights * expert_outputs_raw, dim=1, keepdim=True
-            )
-            if use_constraint:
-                current_sum = final_density.sum(
-                    dim=(1, 2, 3, 4), keepdim=True
-                ) + 1e-8
-                target_sum = total_electrons.view(-1, 1, 1, 1, 1)
-                final_density = final_density * target_sum / current_sum
-            return (
-                routing_weights,
-                thresholds_log10,
-                final_density,
-                guide_field_detached,
-            )
 
         th_linear = torch.pow(10.0, thresholds_log10)
         th_cubic = torch.pow(th_linear, 1.0/3.0)
@@ -415,47 +300,19 @@ class PhysicsMoE(nn.Module):
         min_vals = torch.zeros(self.num_experts, device=features.device)
         max_vals = torch.zeros(self.num_experts, device=features.device)
 
-        if self.num_experts > 1:
-            min_vals[1:] = th_cubic
-            max_vals[:-1] = th_cubic
+        min_vals[1:] = th_cubic
+        max_vals[:-1] = th_cubic
 
         max_vals[-1] = 21.5443
         min_vals = min_vals.view(1, -1, 1, 1, 1)
         max_vals = max_vals.view(1, -1, 1, 1, 1)
 
-        if self.expert_output_mode == "interval_sigmoid":
-            normalized_expert = torch.sigmoid(expert_raw)
-            expert_outputs_cubic = (
-                min_vals + normalized_expert * (max_vals - min_vals)
-            )
-        elif self.expert_output_mode == "interval_unbounded":
-            unbounded_fraction = (
-                0.5 * F.softplus(expert_raw) / math.log(2.0)
-            )
-            expert_outputs_cubic = (
-                min_vals + unbounded_fraction * (max_vals - min_vals)
-            )
-        else:
-            expert_outputs_cubic = torch.sigmoid(expert_raw) * 21.5443
-
-        if self.fusion_mode == "soft":
-            fusion_weights = routing_weights
-        else:
-            hard_index = torch.argmax(routing_weights, dim=1, keepdim=True)
-            hard_weights = torch.zeros_like(routing_weights).scatter_(
-                1, hard_index, 1.0
-            )
-            fusion_weights = (
-                hard_weights - routing_weights.detach() + routing_weights
-            )
+        normalized_expert = torch.sigmoid(expert_raw)
+        expert_outputs_cubic = min_vals + normalized_expert * (max_vals - min_vals)
         rho_cubic_fused = torch.sum(
-            fusion_weights * expert_outputs_cubic, dim=1, keepdim=True
+            routing_weights * expert_outputs_cubic, dim=1, keepdim=True
         )
-
-        if not use_constraint:
-            mask = torch.sigmoid((rho_cubic_fused - 1e-2) * 100)
-            final_density = torch.pow(rho_cubic_fused * mask, 3.0)
-        else:
-            final_density = self.constraint(rho_cubic_fused, total_electrons)
+        mask = torch.sigmoid((rho_cubic_fused - 1e-2) * 100)
+        final_density = torch.pow(rho_cubic_fused * mask, 3.0)
 
         return routing_weights, thresholds_log10, final_density, guide_field_detached

@@ -22,12 +22,6 @@ def parse_args():
         action="store_true",
         help="Recursively scan nested shard/sample directories instead of assuming sample dirs sit directly under raw_data_root.",
     )
-    parser.add_argument(
-        "--cache_format",
-        choices=["legacy_points", "train_ready_grid64"],
-        default="train_ready_grid64",
-        help="legacy_points keeps the old point-cloud cache; train_ready_grid64 stores centered atom coords plus 64^3 target density directly.",
-    )
     parser.add_argument("--grid_res", type=int, default=64)
     parser.add_argument("--grid_bounds", type=float, nargs=2, default=(-10.0, 10.0))
     parser.add_argument(
@@ -136,22 +130,7 @@ def build_target_density_fast(
     return target
 
 
-def build_cache_payload(cache_format, atom_coords, atom_z_numbers, density_data, cube_origin_bohr, step_vec_x_bohr, step_vec_y_bohr, step_vec_z_bohr, grid_res, grid_bounds):
-    if cache_format == "legacy_points":
-        nx, ny, nz = density_data.shape
-        i_indices, j_indices, k_indices = np.indices((nx, ny, nz), dtype=np.int32)
-        indices_matrix = np.stack([i_indices.ravel(), j_indices.ravel(), k_indices.ravel()], axis=1)
-        step_matrix_bohr = np.stack([step_vec_x_bohr, step_vec_y_bohr, step_vec_z_bohr], axis=0)
-        all_coords_bohr = cube_origin_bohr + indices_matrix @ step_matrix_bohr
-        all_coords_ang = all_coords_bohr * BOHR_TO_ANGSTROM
-        density_values = density_data.flatten()
-        return {
-            "atom_coords": atom_coords.astype(np.float32, copy=False),
-            "atom_z_numbers": atom_z_numbers.astype(np.int16, copy=False),
-            "density_coords": all_coords_ang.astype(np.float32, copy=False),
-            "density_values": density_values.astype(np.float32, copy=False),
-        }
-
+def build_cache_payload(atom_coords, atom_z_numbers, density_data, cube_origin_bohr, step_vec_x_bohr, step_vec_y_bohr, step_vec_z_bohr, grid_res, grid_bounds):
     centroid = atom_coords.mean(axis=0).astype(np.float32)
     centered_atom_coords = (atom_coords - centroid).astype(np.float32, copy=False)
     target_density = build_target_density_fast(
@@ -172,11 +151,8 @@ def build_cache_payload(cache_format, atom_coords, atom_z_numbers, density_data,
 
 
 def flush_pending_writes(pending_writes):
-    for output_npz_path, payload, compressed in pending_writes:
-        if compressed:
-            np.savez_compressed(output_npz_path, **payload)
-        else:
-            np.savez(output_npz_path, **payload)
+    for output_npz_path, payload in pending_writes:
+        np.savez(output_npz_path, **payload)
     pending_writes.clear()
 
 
@@ -185,7 +161,7 @@ def main():
     raw_data_root = args.raw_data_root.expanduser().resolve()
     cache_dir = args.cache_dir.expanduser().resolve()
 
-    print(f"开始生成缓存文件 (format={args.cache_format}, write_batch_size={args.write_batch_size})...")
+    print(f"开始生成缓存文件 (write_batch_size={args.write_batch_size})...")
     print(f"正在扫描目录 {raw_data_root}...")
     valid_samples = []
     if args.sample_id is not None:
@@ -225,7 +201,6 @@ def main():
 
     grid_bounds = tuple(args.grid_bounds)
     pending_writes = []
-    compressed = args.cache_format == "legacy_points"
 
     for sample_id, sample_dir in tqdm(valid_samples, desc="生成缓存"):
         output_npz_path = cache_dir / f"{sample_id}.npz"
@@ -233,12 +208,14 @@ def main():
             continue
         try:
             sdf_file_path = next(iter(sorted(sample_dir.glob("*.sdf"))))
-            cube_file_path = next(iter(sorted(sample_dir.glob("*.cube"))))
+            cube_files = sorted(sample_dir.glob("*.cube"))
+            if len(cube_files) != 1:
+                raise ValueError(f"Expected one density CUBE in {sample_dir}, found {len(cube_files)}")
+            cube_file_path = cube_files[0]
             atom_coords, atom_z_numbers = load_atoms_with_cube_fallback(sdf_file_path, cube_file_path)
             cube_obj = read_cube(cube_file_path)
             density_data = np.asarray(cube_obj.data, dtype=np.float32)
             payload = build_cache_payload(
-                cache_format=args.cache_format,
                 atom_coords=atom_coords,
                 atom_z_numbers=atom_z_numbers,
                 density_data=density_data,
@@ -249,7 +226,7 @@ def main():
                 grid_res=args.grid_res,
                 grid_bounds=grid_bounds,
             )
-            pending_writes.append((output_npz_path, payload, compressed))
+            pending_writes.append((output_npz_path, payload))
             if len(pending_writes) >= args.write_batch_size:
                 flush_pending_writes(pending_writes)
         except Exception as e:

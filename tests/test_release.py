@@ -3,15 +3,14 @@ import unittest
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import torch
 
 from cube_reader import read_cube
-from dataset_moe_phys import create_pe_grid
+from dataset_moe_phys import PhysicsMoEDataset, create_pe_grid
 from model_softmoe_phys import normalize_density_to_electrons
-from train_softmoe_phys_duoka import MoEPhysModule, build_initial_bins
+from train import MoEPhysModule, build_initial_bins
 
 
 class ReleaseSmokeTests(unittest.TestCase):
@@ -65,15 +64,34 @@ class ReleaseSmokeTests(unittest.TestCase):
             subprocess.run(command, check=True, capture_output=True, text=True)
             self.assertTrue((root / "cache" / "19412.npz").exists())
             self.assertFalse((root / "cache" / "shard_000__19412.npz").exists())
+            item = PhysicsMoEDataset(root / "cache", ["19412"], grid_res=8)[0]
+            self.assertEqual(item["target_density"].shape, (1, 8, 8, 8))
+            self.assertEqual(item["atom_grid"].shape, (13, 8, 8, 8))
+            (sample / "Mol1_ESP.cube").write_text(cube, encoding="utf-8")
+            with self.assertRaises(subprocess.CalledProcessError):
+                subprocess.run(command + ["--force"], check=True, capture_output=True, text=True)
 
     def test_paper_base_has_37_experts_and_expected_parameters(self):
-        args = SimpleNamespace(expert_count=0, bins_mode="decade_exact",
-                               decade_min_exp=-34, decade_max_exp=1)
-        bins = build_initial_bins(args)
+        bins = build_initial_bins()
         self.assertEqual(len(bins) - 1, 37)
-        model = MoEPhysModule(13, 24, 37, bins)
+        model = MoEPhysModule()
         self.assertEqual(sum(p.numel() for p in model.parameters()), 50_661_546)
         self.assertEqual(create_pe_grid(8).shape, (1, 24, 8, 8, 8))
+
+    def test_paper_model_forward(self):
+        model = MoEPhysModule(grid_res=8).eval()
+        atom_grid = torch.rand(1, 13, 8, 8, 8)
+        pe_grid = create_pe_grid(8)[0]
+        v_ext = -torch.rand(1, 1, 8, 8, 8)
+        with torch.no_grad():
+            weights, thresholds, density, guide = model(
+                atom_grid, pe_grid, v_ext, atom_grid.sum(dim=1, keepdim=True)
+            )
+        self.assertEqual(weights.shape, (1, 37, 8, 8, 8))
+        self.assertEqual(thresholds.shape, (36,))
+        self.assertEqual(density.shape, (1, 1, 8, 8, 8))
+        self.assertEqual(guide.shape, density.shape)
+        self.assertTrue(bool(torch.isfinite(density).all()))
 
     def test_portable_split_sets(self):
         root = Path(__file__).resolve().parents[1] / "splits"

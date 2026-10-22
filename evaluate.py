@@ -8,23 +8,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from dataset_moe_phys import PhysicsMoEDataset
+from dataset_moe_phys import PhysicsMoEDataset, load_sample_ids
 from model_softmoe_phys import normalize_density_to_electrons
 from physics_utils import PhysicsUtils
-from train_softmoe_phys_duoka import MoEPhysModule
-
-
-def load_ids(path):
-    if path.suffix == ".npy":
-        values = np.load(path, allow_pickle=False)
-        if values.ndim != 1:
-            raise ValueError("ID array must be one dimensional")
-        ids = [value.decode("ascii") if isinstance(value, bytes) else str(value) for value in values]
-    else:
-        ids = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    if not ids or len(ids) != len(set(ids)):
-        raise ValueError("ID list must be nonempty and unique")
-    return ids
+from train import load_model_weights
 
 
 def metrics(pred, target):
@@ -47,18 +34,15 @@ def main():
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--voxel-volume-bohr3", type=float, default=0.064)
     args = parser.parse_args()
-    ids = load_ids(args.sample_ids)
+    ids = load_sample_ids(args.sample_ids)
     device = torch.device(args.device)
-    module = MoEPhysModule.load_from_checkpoint(str(args.checkpoint), map_location=device)
-    module.eval().to(device)
-    module.model.use_hard_routing = False
+    module = load_model_weights(args.checkpoint, device)
     grid_res = int(module.hparams.grid_res)
     grid_bounds = tuple(module.hparams.grid_bounds)
-    bins = [0.0] + [10.0 ** exponent for exponent in range(-34, 2)] + [float("inf")]
     dataset = PhysicsMoEDataset(
-        cache_dir=args.cache_dir, raw_data_root=args.cache_dir,
+        cache_dir=args.cache_dir,
         grid_res=grid_res, grid_bounds=grid_bounds,
-        class_bins=bins, sample_ids=ids, strict=True,
+        sample_ids=ids, num_pe_freqs=module.hparams.num_pe_freqs,
     )
     grid = PhysicsUtils.get_grid_coords(grid_res, grid_bounds, device=device)
     rows = []
@@ -72,7 +56,6 @@ def main():
             v_ext = PhysicsUtils.build_vext(atom_coords, atom_z, grid)
             _, _, raw, _ = module(
                 atom_grid, pe_grid, v_ext, atom_grid.sum(dim=1, keepdim=True),
-                target_integral=None, use_constraint=False,
             )
             nominal = normalize_density_to_electrons(
                 raw, item["target_electrons"][None].to(device),
