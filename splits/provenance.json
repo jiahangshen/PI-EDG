@@ -1,0 +1,17 @@
+{
+  "reported_2000_is_validation_subset": true,
+  "splits": {
+    "train": {
+      "count": 18689,
+      "sha256_of_text": "5f85e6d429a16a5a93fc21b3c325b53e2a1a33c2481158b617b4d71638cb7fd6"
+    },
+    "validation": {
+      "count": 2076,
+      "sha256_of_text": "2a34b98b62cb908385287a386056ea57d4270fa792871adb8e71674133723876"
+    },
+    "reported_2000": {
+      "count": 2000,
+      "sha256_of_text": "54bb3a5f10d70aed27912149abb2e177afaf24e5ff714415a17bd103bf7ffb46"
+    }
+  }
+}
