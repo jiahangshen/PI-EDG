@@ -66,18 +66,18 @@ python predict.py \
   --voxel-volume-bohr3 0.064
 ```
 
-Evaluate an ID list against the prepared cache:
+Evaluate on a dedicated, held-out test set. Prepare a text file containing one test molecule ID per line, and ensure those molecules are present in the cache:
 
 ```bash
 python evaluate.py \
   --checkpoint /path/to/best.ckpt \
   --cache-dir /path/to/edbench/cache \
-  --sample-ids /path/to/evaluation_ids.txt \
-  --output-dir outputs/evaluation \
+  --sample-ids /path/to/edbench/test_ids.txt \
+  --output-dir outputs/test \
   --voxel-volume-bohr3 0.064
 ```
 
-Set `--voxel-volume-bohr3` to match your source-density integration convention. The supplied 2,000 evaluation IDs are a subset of the validation IDs, not an independent test set; see [`splits/provenance.json`](splits/provenance.json). Numerical details that differ from simplified manuscript equations are listed in [Implementation notes](IMPLEMENTATION_NOTES.md).
+Set `--voxel-volume-bohr3` to match your source-density integration convention. The test IDs must be disjoint from the training IDs.
 
 ## License
 
