@@ -1,10 +1,4 @@
-"""Small, self-contained reader for single-field Gaussian CUBE files.
-
-The original research workspace used a copy of Cube-Toolz.  This release only
-needs the density array, origin, and three axis vectors, so it avoids bundling
-that third-party source. Coordinates are returned in Bohr, matching the
-preprocessing convention used for the paper's EDBench cache.
-"""
+"""Read single-field Gaussian CUBE files with coordinates in Bohr."""
 
 from __future__ import annotations
 

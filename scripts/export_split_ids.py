@@ -1,7 +1,4 @@
-"""Extract portable ID-only split files from research JSON manifests.
-
-No dataset paths, predictions, or machine-specific metadata are copied.
-"""
+"""Export ID-only split files from JSON manifests."""
 
 import argparse
 import hashlib

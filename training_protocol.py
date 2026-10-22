@@ -1,4 +1,4 @@
-"""Small, testable guards for PI-EDG training-stage transitions."""
+"""Training-stage switches."""
 
 
 def stage_is_enabled(
@@ -8,11 +8,7 @@ def stage_is_enabled(
     start_epoch: int,
     start_step: int,
 ) -> bool:
-    """Return whether an optional stage has started.
-
-    A nonnegative step takes precedence over the epoch schedule. If both
-    schedules are negative, the stage is disabled.
-    """
+    """Use the step threshold when set; otherwise use the epoch threshold."""
 
     if start_step >= 0:
         return global_step >= start_step

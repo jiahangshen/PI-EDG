@@ -10,7 +10,7 @@ from dataset_phys import voxelize_structure, voxelize_raw_density_from_points
 
 
 def open_cache_readonly(path):
-    """Avoid relatime metadata writes when reading owned cache archives."""
+    """Open a cache file without updating access time where supported."""
     if hasattr(os, 'O_NOATIME'):
         try:
             return os.fdopen(os.open(path, os.O_RDONLY | os.O_NOATIME), 'rb')
@@ -57,9 +57,6 @@ class PhysicsMoEDataset(Dataset):
         self.grid_bounds = grid_bounds
         self.class_bins = class_bins
         self.strict = strict
-        # Keep the historical lexicographic default for checkpoint compatibility.
-        # Reviewer experiments pass an explicit, shared manifest order so that
-        # random_split(seed=42) is identical across PI-EDG and all baselines.
         self.indices = (
             sample_ids if isinstance(sample_ids, np.ndarray)
             else [str(sample_id) for sample_id in sample_ids]
@@ -78,7 +75,6 @@ class PhysicsMoEDataset(Dataset):
         return len(self.indices)
 
     def _load_sad_grid(self, sample_id):
-        # PI-EDG uses geometry-derived fields only; no density-like SAD input.
         return None
 
     def __getitem__(self, idx):

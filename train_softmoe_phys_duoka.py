@@ -301,9 +301,7 @@ class DelayedEarlyStopping(EarlyStopping):
                     flush=True,
                 )
             return
-        # Count every validation check, including those before the minimum
-        # step/epoch.  Only the stop decision is delayed.  Otherwise four
-        # consecutive non-improvements before 25k are silently discarded.
+        # Track validation checks before the minimum step; delay only stopping.
         self._allow_early_stop = not delayed
         return super()._run_early_stopping_check(trainer)
 
@@ -367,8 +365,7 @@ class SampleExposureCounter(pl.Callback):
 
     def on_fit_end(self, trainer, pl_module):
         distributed = torch.distributed.is_available() and torch.distributed.is_initialized()
-        # Lightning may move the module to CPU before on_fit_end. NCCL still
-        # requires CUDA tensors for collectives at this point.
+        # NCCL collectives require CUDA tensors, including at on_fit_end.
         device = (torch.device('cuda', torch.cuda.current_device())
                   if distributed and torch.distributed.get_backend() == 'nccl'
                   else pl_module.device)
@@ -408,8 +405,7 @@ def load_weights_only(module: nn.Module, checkpoint_path: str):
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     state_dict = checkpoint.get('state_dict', checkpoint)
     missing, unexpected = module.load_state_dict(state_dict, strict=False)
-    # A shared initialization contains the historical endpoint grid buffer.
-    # Restore the requested voxel-center geometry after loading shared weights.
+    # The grid buffer must match the requested grid after loading weights.
     if getattr(getattr(module, 'hparams', None), 'core_geometry', 'legacy') == 'voxel_center':
         from reviewer_experiments.core_precision.geometry import centered_grid
         module.grid_buffer.copy_(centered_grid(module.hparams.grid_res,
@@ -575,9 +571,7 @@ class MoEPhysModule(pl.LightningModule):
         self.train_mae = MeanAbsoluteError()
         self._thresholds_frozen = False
         self._hard_routing_enabled = False
-        # Permanently fixed routing must be frozen before DDP wraps the module.
-        # Freezing it in on_fit_start is too late: DDP still registers log_gaps
-        # and expects a gradient on the second batch.
+        # Freeze before DDP registers parameters.
         if threshold_freeze_epochs >= 999 and threshold_freeze_steps <= 0:
             self._set_threshold_trainable(False)
 
@@ -862,7 +856,6 @@ class MoEPhysModule(pl.LightningModule):
                 foreach=False,
             )
         else:
-            # Disable foreach to reduce peak optimizer-step memory for very large models.
             opt = torch.optim.AdamW(param_groups, lr=self.hparams.lr, foreach=False)
         eta_min = float(self.hparams.lr) * float(self.hparams.min_lr_ratio)
         max_steps = int(getattr(self.trainer, "max_steps", -1))
@@ -1373,11 +1366,7 @@ def main():
             mode='min',
             save_last=True,
         )
-        # ``val_check_interval=1.0`` means once per epoch in Lightning.  Do not
-        # reinterpret that fractional value as "checkpoint every one training
-        # step": doing so writes a full ~1 GB optimizer checkpoint per batch.
-        # The monitored callback already writes the best checkpoint and
-        # ``last.ckpt`` on validation checks, which is sufficient for recovery.
+        # Lightning interprets val_check_interval=1.0 as once per epoch.
         callbacks = [checkpoint_callback, PeriodicStatusLogger(args.status_log_interval), FitSummaryLogger()]
         if args.save_raw_best and args.checkpoint_metric != 'val_mae':
             callbacks.append(ModelCheckpoint(

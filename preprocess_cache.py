@@ -210,8 +210,6 @@ def main():
         if not sample_dir.name.isdigit():
             continue
         if any(sample_dir.glob("*.sdf")) and any(sample_dir.glob("*.cube")):
-            # The frozen paper split files use the numeric leaf directory ID,
-            # independent of the enclosing archive/shard layout.
             sample_id = sample_dir.name
             valid_samples.append((sample_id, sample_dir))
     sample_ids = [sample_id for sample_id, _ in valid_samples]

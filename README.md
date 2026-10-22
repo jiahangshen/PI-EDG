@@ -2,10 +2,7 @@
 
 **Physics-Informed Full-Space Electron Density Generation from Molecular Geometry**
 
-PI-EDG predicts a molecule's electron density on a `64³` grid from its atomic
-elements and coordinates. This repository provides the paper-version voxel
-model, training code, and inference scripts. It does not include EDBench data
-or pretrained weights.
+PI-EDG predicts a molecule's electron density on a `64³` grid from its atomic elements and coordinates. This repository provides the paper-version voxel model, training code, and inference scripts. It does not include EDBench data or pretrained weights.
 
 ## Download EDBench
 
@@ -14,14 +11,9 @@ Get the data from the [official EDBench repository](https://github.com/HongxinXi
 - [Full EDBench release (Baidu Drive)](https://pan.baidu.com/s/1VNoN8Uwo5XCyzk7z19X7Rg?pwd=yxy4), for the complete molecular collection. The extraction code is `yxy4`.
 - [ED5-EDP electron-density prediction subset (Harvard Dataverse)](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/SLYBD1), listed by EDBench as `ed_prediction_5w`.
 
-Use each molecule's geometry `.sdf` and **electron-density** `Mol1_Dt.cube`.
-Do not use `Mol1_ESP.cube`, which contains electrostatic potential rather than
-electron density. The provided [`splits/`](splits/) contain molecule IDs only;
-check that the download contains every ID you intend to train or evaluate on.
+Use each molecule's geometry `.sdf` and **electron-density** `Mol1_Dt.cube`. Do not use `Mol1_ESP.cube`, which contains electrostatic potential rather than electron density. The provided [`splits/`](splits/) contain molecule IDs only; check that the download contains every ID you intend to train or evaluate on.
 
-The cache builder expects one numeric directory per molecule with one `.sdf`
-and one `.cube` file. If the downloaded directories also contain an ESP CUBE,
-stage only the density CUBE in the input tree:
+The cache builder expects one numeric directory per molecule with one `.sdf` and one `.cube` file. If the downloaded directories also contain an ESP CUBE, stage only the density CUBE in the input tree:
 
 ```text
 /path/to/edbench/input/
@@ -31,13 +23,11 @@ stage only the density CUBE in the input tree:
         └── Mol1_Dt.cube
 ```
 
-Nested shard directories are supported. EDBench remains governed by its own
-distribution terms; it is not redistributed here.
+Nested shard directories are supported. EDBench remains governed by its own distribution terms; it is not redistributed here.
 
 ## Install and prepare
 
-Use a CUDA-compatible PyTorch installation, then install the remaining
-requirements:
+Use a CUDA-compatible PyTorch installation, then install the remaining requirements:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -64,13 +54,11 @@ python train_softmoe_phys_duoka.py \
   --strict_data --skip_lr_find --logger_type csv
 ```
 
-The default model is the PI-EDG Hybrid FNO–CNN backbone with density-space
-experts. Adjust training options with `--help` for your hardware and use case.
+The default model is the PI-EDG Hybrid FNO–CNN backbone with density-space experts. Adjust training options with `--help` for your hardware and use case.
 
 ## Predict and evaluate
 
-Predict from a neutral SDF or XYZ structure using a trained Lightning
-checkpoint:
+Predict from a neutral SDF or XYZ structure using a trained Lightning checkpoint:
 
 ```bash
 python predict.py \
@@ -91,10 +79,7 @@ python evaluate.py \
   --voxel-volume-bohr3 0.064
 ```
 
-Set `--voxel-volume-bohr3` to match your source-density integration convention.
-For details about the paper implementation and split provenance, see
-[PAPER_ALIGNMENT.md](PAPER_ALIGNMENT.md) and [`splits/provenance.json`](splits/provenance.json).
-The later F3/S3 research variants are not part of this paper-version release.
+Set `--voxel-volume-bohr3` to match your source-density integration convention. For details about the paper implementation and split provenance, see [PAPER_ALIGNMENT.md](PAPER_ALIGNMENT.md) and [`splits/provenance.json`](splits/provenance.json). The later F3/S3 research variants are not part of this paper-version release.
 
 ## License
 

@@ -234,10 +234,6 @@ class LogSpaceLearnableRouter(nn.Module):
         if routing_space == "log":
             boundary_logits = self.temperature * (guide_field_log10 - t)
         elif routing_space == "linear":
-            # Keep the same guide predictor, guide loss, and learnable thresholds,
-            # but make the routing comparison after mapping both quantities back
-            # to linear density.  The symmetric relative difference is bounded
-            # and remains numerically stable across the 35-decade density range.
             guide_linear = torch.pow(
                 10.0, torch.clamp(guide_field_log10, min=-35.0, max=4.0)
             )
@@ -352,8 +348,6 @@ class PhysicsMoE(nn.Module):
         self.shared_expert_trunk = nn.Sequential(*shared_expert_layers)
         self.expert_out = nn.Conv3d(expert_hidden_channels, num_experts, kernel_size=1)
         if self.expert_output_mode == "global_sigmoid":
-            # Match the Full model's interval-midpoint initialization while
-            # allowing every expert to learn anywhere in the global range.
             initial_internal = np.asarray(initial_bins[1:-1], dtype=np.float64)
             initial_thresholds_cubic = np.power(initial_internal, 1.0 / 3.0)
             initial_min = np.zeros(num_experts, dtype=np.float64)
@@ -435,8 +429,6 @@ class PhysicsMoE(nn.Module):
                 min_vals + normalized_expert * (max_vals - min_vals)
             )
         elif self.expert_output_mode == "interval_unbounded":
-            # Retain threshold-derived interval origins/scales, but remove the
-            # sigmoid upper bound. Softplus keeps cube-root density nonnegative.
             unbounded_fraction = (
                 0.5 * F.softplus(expert_raw) / math.log(2.0)
             )
@@ -444,8 +436,6 @@ class PhysicsMoE(nn.Module):
                 min_vals + unbounded_fraction * (max_vals - min_vals)
             )
         else:
-            # Retain bounded sigmoid remapping, while removing expert-specific
-            # intervals by giving every expert the same global output range.
             expert_outputs_cubic = torch.sigmoid(expert_raw) * 21.5443
 
         if self.fusion_mode == "soft":
@@ -455,7 +445,6 @@ class PhysicsMoE(nn.Module):
             hard_weights = torch.zeros_like(routing_weights).scatter_(
                 1, hard_index, 1.0
             )
-            # Hard top-1 forward pass with soft-routing gradients.
             fusion_weights = (
                 hard_weights - routing_weights.detach() + routing_weights
             )
