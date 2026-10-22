@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from dataset_moe_phys import PhysicsMoEDataset, load_sample_ids
+from dataset import PhysicsMoEDataset, load_sample_ids
 from model_softmoe_phys import normalize_density_to_electrons
 from physics_utils import PhysicsUtils
 from train import load_model_weights

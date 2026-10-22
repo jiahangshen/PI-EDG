@@ -10,7 +10,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
-from dataset_moe_phys import PhysicsMoEDataset, collate_fn_moe_phys, load_sample_ids
+from dataset import PhysicsMoEDataset, collate_fn_moe_phys, load_sample_ids
 from model_softmoe_phys import PhysicsMoE, normalize_density_to_electrons
 from physics_utils import PhysicsUtils
 

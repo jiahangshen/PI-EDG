@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from cube_reader import read_cube
-from dataset_moe_phys import PhysicsMoEDataset, create_pe_grid
+from dataset import PhysicsMoEDataset, create_pe_grid
 from model_softmoe_phys import normalize_density_to_electrons
 from train import MoEPhysModule, build_initial_bins
 

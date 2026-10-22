@@ -7,8 +7,7 @@ import numpy as np
 import torch
 from ase.io import read as ase_read
 
-from dataset_moe_phys import create_pe_grid
-from dataset_phys import ATOM_MAP, voxelize_structure
+from dataset import ATOM_MAP, create_pe_grid, voxelize_structure
 from model_softmoe_phys import normalize_density_to_electrons
 from physics_utils import PhysicsUtils
 from train import load_model_weights
