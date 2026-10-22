@@ -40,24 +40,24 @@ def load_atoms_with_cube_fallback(sdf_file_path, cube_file_path):
         atom_z_numbers = atoms_ase.get_atomic_numbers().astype(np.int16)
         return atom_coords, atom_z_numbers
     except Exception as exc:
-        print(f"SDF 读取失败，改用 CUBE 头原子列表回退: {sdf_file_path} ({exc})")
+        print(f"Failed to read SDF; falling back to the CUBE header atom list: {sdf_file_path} ({exc})")
 
     with cube_file_path.open("r", encoding="utf-8") as f:
         lines = f.readlines()
     if len(lines) < 7:
-        raise ValueError(f"CUBE 文件头不完整: {cube_file_path}")
+        raise ValueError(f"Incomplete CUBE header: {cube_file_path}")
 
     num_atoms = abs(int(lines[2].split()[0]))
     atom_lines = lines[6 : 6 + num_atoms]
     if len(atom_lines) != num_atoms:
-        raise ValueError(f"CUBE 原子列表不完整: {cube_file_path}")
+        raise ValueError(f"Incomplete CUBE atom list: {cube_file_path}")
 
     atom_z_numbers = []
     atom_coords_bohr = []
     for line in atom_lines:
         parts = line.split()
         if len(parts) < 5:
-            raise ValueError(f"CUBE 原子行格式错误: {line.rstrip()}")
+            raise ValueError(f"Malformed CUBE atom line: {line.rstrip()}")
         atom_z_numbers.append(int(float(parts[0])))
         atom_coords_bohr.append([float(parts[2]), float(parts[3]), float(parts[4])])
 
@@ -161,8 +161,8 @@ def main():
     raw_data_root = args.raw_data_root.expanduser().resolve()
     cache_dir = args.cache_dir.expanduser().resolve()
 
-    print(f"开始生成缓存文件 (write_batch_size={args.write_batch_size})...")
-    print(f"正在扫描目录 {raw_data_root}...")
+    print(f"Building cache files (write_batch_size={args.write_batch_size})...")
+    print(f"Scanning {raw_data_root}...")
     valid_samples = []
     if args.sample_id is not None:
         if raw_data_root.name == args.sample_id:
@@ -182,7 +182,7 @@ def main():
         else:
             sample_dirs = list(raw_data_root.iterdir())
 
-    for sample_dir in tqdm(sample_dirs, desc="扫描目录"):
+    for sample_dir in tqdm(sample_dirs, desc="Scanning directories"):
         if not sample_dir.name.isdigit():
             continue
         if any(sample_dir.glob("*.sdf")) and any(sample_dir.glob("*.cube")):
@@ -191,18 +191,18 @@ def main():
     sample_ids = [sample_id for sample_id, _ in valid_samples]
     if len(sample_ids) != len(set(sample_ids)):
         raise ValueError("Duplicate numeric sample IDs across raw-data shards")
-    print(f"找到 {len(valid_samples)} 个有效的样本。")
+    print(f"Found {len(valid_samples)} valid samples.")
     if not valid_samples:
         raise FileNotFoundError(f"No usable numeric sample directories under {raw_data_root}")
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    print(f"缓存文件将保存在: {cache_dir}")
-    print(f"开始处理 {len(valid_samples)} 个分子并生成缓存...")
+    print(f"Cache files will be saved to: {cache_dir}")
+    print(f"Processing {len(valid_samples)} molecules and building cache files...")
 
     grid_bounds = tuple(args.grid_bounds)
     pending_writes = []
 
-    for sample_id, sample_dir in tqdm(valid_samples, desc="生成缓存"):
+    for sample_id, sample_dir in tqdm(valid_samples, desc="Building cache"):
         output_npz_path = cache_dir / f"{sample_id}.npz"
         if output_npz_path.exists() and not args.force:
             continue
@@ -235,7 +235,7 @@ def main():
     if pending_writes:
         flush_pending_writes(pending_writes)
 
-    print("\n所有缓存文件生成完成！")
+    print("\nAll cache files have been built.")
 
 
 if __name__ == "__main__":
